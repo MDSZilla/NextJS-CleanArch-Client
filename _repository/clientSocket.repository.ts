@@ -1,63 +1,90 @@
+'use client;'
 import { ClientSocket } from "@/_entities/clientSocket.entity";
-import { ServerResponse, ServerResponseError } from "@/_entities/serverResponse.entity";
+import { ServerResponseType } from "@/_entities/serverResponse.entity";
 import { ClientSocketStatusEnum } from "@/_enums/clientSocket.enum";
-import { ServerResponseStatus } from "@/_enums/serverResponseStatus.enum";
+import { ServerResponseEnum } from "@/_enums/serverResponseStatus.enum";
 import { IClientSocketInterface } from "@/_interfaces/clientSocket.interface";
-import { getEnvWsURL } from "@/_lib/env/exportEnv";
 import { io } from "socket.io-client";
 
-async function checkSocketServerStatus(wsUrl: string){
-    'use client';
-    try {
-        const res = await fetch(wsUrl);
-    if(res.ok){
-        return true;
-    };
-    } catch (error) {
-        console.log("Error in Fetching The Server");
-        console.error(error);
-        return false;
-    };
-};
+const repositoryName = 'ClientSocketRepository'
 
 export class ClientSocketRepository implements IClientSocketInterface {
 
-    async connect(clientSocket: ClientSocket): Promise<ServerResponse<ClientSocket>> {
-        const wsUrl = await getEnvWsURL();
-        const checkServerAvailability = await checkSocketServerStatus(wsUrl);
-        if(checkServerAvailability){
-            clientSocket.socketHandler = io(wsUrl, {
-                closeOnBeforeunload: true,
-                reconnectionAttempts: 2,
-            });
-    
-            clientSocket.socketHandler.on('connect', () => {
+    async connect(clientSocket: ClientSocket): Promise<ServerResponseType<ClientSocket>> {
+        clientSocket.socketHandler = io('URL', {
+            closeOnBeforeunload: true,
+            reconnectionAttempts: 2,
+            path: '/path',
+        });
+
+        return new Promise((resolve, reject) => {
+
+            //If Socket Connects
+            clientSocket.socketHandler!.on('connect', () => {
                 clientSocket.socketStatus = ClientSocketStatusEnum.CONNECTED;
                 console.log("Socket Connected");
+
+                resolve(<ServerResponseType<ClientSocket>> {
+                    response: clientSocket,
+                    status: ServerResponseEnum.SUCCESS
+                });
+
             });
-    
-            return Promise.resolve(new ServerResponse<ClientSocket>(clientSocket, ServerResponseStatus.SUCCESS));
-        } else {
-            return Promise.resolve(new ServerResponse<ClientSocket>(clientSocket, ServerResponseStatus.SERVERERROR, new ServerResponseError("clientSocket", "connect", "Socket server is not available")));
-        };
+
+            //If Socket Throws Error
+            clientSocket.socketHandler!.on('connect_error', (error) => {
+                console.error("Connection Error:", error);
+                clientSocket.socketStatus = ClientSocketStatusEnum.DISCONNECTED; // Update status on error
+                reject(<ServerResponseType<ClientSocket>> {
+                    response: clientSocket,
+                    error: {
+                        message: `${error}`,
+                        method: 'connect()',
+                        repository: repositoryName,
+                    }, status: ServerResponseEnum.INTERNAL_SERVER_ERROR,
+                });
+            });
+        })
     };
 
-    async disconnect(clientSocket: ClientSocket): Promise<ServerResponse<ClientSocket>> {
+    async disconnect(clientSocket: ClientSocket): Promise<ServerResponseType<ClientSocket>> {
         if(clientSocket.socketStatus === ClientSocketStatusEnum.CONNECTED){
             clientSocket.socketHandler!.disconnect();
             clientSocket.socketStatus = ClientSocketStatusEnum.DISCONNECTED;
-            return Promise.resolve(new ServerResponse<ClientSocket>(clientSocket, ServerResponseStatus.SUCCESS));
+            return Promise.resolve(<ServerResponseType<ClientSocket>> {
+                status: ServerResponseEnum.SUCCESS,
+                response: clientSocket,
+            });
         } else {
-            return Promise.resolve(new ServerResponse<ClientSocket>(clientSocket, ServerResponseStatus.SERVERERROR, new ServerResponseError("clientSocket", "disconnect", "Socket is not connected")));
+            return Promise.resolve(<ServerResponseType<ClientSocket>> {
+                status: ServerResponseEnum.BAD_REQUEST,
+                response: clientSocket,
+                error: {
+                    message: 'Socket is not connected.',
+                    method: 'disconnect()',
+                    repository: repositoryName,
+                },
+            });
         };
     };
 
-    async send(clientSocket: ClientSocket, key:string, message: any): Promise<ServerResponse<ClientSocket>> {
+    async send(clientSocket: ClientSocket, key:string, message: any): Promise<ServerResponseType<ClientSocket>> {
         if(clientSocket.socketStatus === ClientSocketStatusEnum.CONNECTED){
             clientSocket.socketHandler!.emit(key, message!);
-            return Promise.resolve(new ServerResponse<ClientSocket>(clientSocket, ServerResponseStatus.SUCCESS));
+            return Promise.resolve(<ServerResponseType<ClientSocket>> {
+                response: clientSocket,
+                status: ServerResponseEnum.SUCCESS,
+            });
         } else {
-            return Promise.resolve(new ServerResponse<ClientSocket>(clientSocket, ServerResponseStatus.SERVERERROR, new ServerResponseError("clientSocket", "send", "Socket is not connected")));
+            return Promise.resolve(<ServerResponseType<ClientSocket>> {
+                response: clientSocket,
+                status: ServerResponseEnum.BAD_REQUEST,
+                error: {
+                    message: "Socket is not connected.",
+                    method: 'send()',
+                    repository: repositoryName,
+                },
+            });
         };
     };
 };
